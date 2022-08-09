@@ -36,6 +36,16 @@ pub struct Metadata {
 /// `ar://`
 #[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug, Default)]
 pub struct Extension {
+    /// certificate information
+    pub certificate: CertificateInfo,
+    /// recipient information
+    pub recipient: RecipientInfo,
+    /// optional list of organizations issuing the certificate
+    pub issuing_organizations: Option<Vec<Organization>>,
+    /// optional list of individuals issuing the certificate
+    pub issuing_individuals: Option<Vec<Individual>>,
+    /// optional list of additional information for the certificate. Courses, instructors, etc.
+    pub inclusions: Option<Vec<Inclusion>>,
     /// url to the image
     pub image: Option<String>,
     /// raw SVG image data (not recommended). Only use this if you're not including the image parameter
@@ -100,4 +110,48 @@ pub struct Authentication {
     pub key: Option<String>,
     /// username used in basic authentication
     pub user: Option<String>,
+}
+
+// certificate information
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug, Default)]
+pub struct CertificateInfo {
+    pub name: Option<String>,
+    pub cert_type: Option<String>,
+    pub issue_date: Option<String>,
+    pub expire_date: Option<String>,
+    pub cert_number: String,
+}
+
+// recipient information
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug, Default)]
+pub struct RecipientInfo {
+    pub first_name: String,
+    pub middle_name: Option<String>,
+    pub last_name: String,
+    pub date_of_birth: Option<String>,
+    pub id: Option<String>,
+}
+
+// issuing organization information
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug, Default)]
+pub struct Organization {
+    pub name: Option<String>,
+    pub address: Option<String>,
+    pub url: Option<String>,
+}
+
+// issuing individual information
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug, Default)]
+pub struct Individual {
+    pub name: Option<String>,
+    pub company: Option<String>,
+    pub title: Option<String>,
+}
+
+// idk what to call this one, its for instructors and classes n stuff
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug, Default)]
+pub struct Inclusion {
+    pub inclusion_type: Option<String>,
+    pub name: Option<String>,
+    pub value: Option<String>,
 }
