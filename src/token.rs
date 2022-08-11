@@ -38,8 +38,10 @@ pub struct Metadata {
 pub struct Extension {
     /// certificate information
     pub certificate: CertificateInfo,
-    /// recipient information
-    pub recipient: RecipientInfo,
+    /// certificate recipient (if certified is human)
+    pub certified_individual: Option<RecipientInfo>,
+    /// certified items
+    pub certified_items: Option<Vec<ItemInfo>>,
     /// optional list of organizations issuing the certificate
     pub issuing_organizations: Option<Vec<Organization>>,
     /// optional list of individuals issuing the certificate
@@ -130,6 +132,16 @@ pub struct RecipientInfo {
     pub last_name: String,
     pub date_of_birth: Option<String>,
     pub id: Option<String>,
+}
+
+// recipient information
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug, Default)]
+pub struct ItemInfo {
+    pub name: String,
+    pub model_number: Option<String>,
+    pub serial_number: Option<String>,
+    pub manufacturer: Option<String>,
+    pub manufacture_date: Option<String>,
 }
 
 // issuing organization information
