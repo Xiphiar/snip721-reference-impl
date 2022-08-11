@@ -7368,6 +7368,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: HumanAddr("charlie".to_string()),
             viewer: None,
+            access_code: None,
             viewing_key: Some("ckey".to_string()),
             start_after: None,
             limit: Some(30),
@@ -7436,6 +7437,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: HumanAddr("alice".to_string()),
             viewer: None,
+            access_code: None,
             viewing_key: Some("akey".to_string()),
             start_after: None,
             limit: Some(30),
@@ -8839,6 +8841,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: HumanAddr("alice".to_string()),
             viewer: None,
+            access_code: None,
             viewing_key: Some("akey".to_string()),
             start_after: None,
             limit: Some(30),
@@ -8900,6 +8903,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: HumanAddr("charlie".to_string()),
             viewer: None,
+            access_code: None,
             viewing_key: Some("ckey".to_string()),
             start_after: None,
             limit: Some(30),

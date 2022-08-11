@@ -47,8 +47,12 @@ pub const PREFIX_TXS: &[u8] = b"rawtxs";
 pub const PREFIX_TX_IDS: &[u8] = b"txids";
 /// prefix for storage of owner's list of "all" permissions
 pub const PREFIX_ALL_PERMISSIONS: &[u8] = b"allpermissions";
+/// prefix for storage of owner's list of "all" permission access codes
+pub const PREFIX_ALL_CODE_PERMISSIONS: &[u8] = b"allcodepermissions";
 /// prefix for storage of owner's list of tokens permitted to addresses
 pub const PREFIX_AUTHLIST: &[u8] = b"authlist";
+/// prefix for storage of owner's list of tokens permitted with access codes
+pub const PREFIX_CODE_AUTHLIST: &[u8] = b"codeauthlist";
 /// prefix for storage of an address' ownership prvicacy
 pub const PREFIX_OWNER_PRIV: &[u8] = b"ownerpriv";
 /// prefix for storage of viewing keys
@@ -405,6 +409,15 @@ pub struct Permission {
     pub expirations: [Option<Expiration>; 3],
 }
 
+/// permission to view token info/transfer tokens
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct CodePermission {
+    /// permitted address
+    pub code: String,
+    /// list of permission expirations for this address
+    pub expirations: [Option<Expiration>; 3],
+}
+
 /// permission types
 #[derive(Serialize, Deserialize, Debug)]
 pub enum PermissionType {
@@ -434,6 +447,15 @@ impl PermissionType {
 pub struct AuthList {
     /// whitelisted address
     pub address: CanonicalAddr,
+    /// lists of tokens address has access to
+    pub tokens: [Vec<u32>; 3],
+}
+
+/// list of one owner's tokens authorized with a code
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CodeAuthList {
+    /// access code
+    pub code: String,
     /// lists of tokens address has access to
     pub tokens: [Vec<u32>; 3],
 }

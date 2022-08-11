@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use cosmwasm_std::CanonicalAddr;
 
-use crate::state::Permission;
+use crate::state::{Permission, CodePermission};
 
 /// token
 #[derive(Serialize, Deserialize)]
@@ -12,6 +12,8 @@ pub struct Token {
     pub owner: CanonicalAddr,
     /// permissions granted for this token
     pub permissions: Vec<Permission>,
+    /// permissions granted for this token
+    pub code_permissions: Vec<CodePermission>,
     /// true if this token has been unwrapped.  If sealed metadata is not enabled, all
     /// tokens are considered unwrapped
     pub unwrapped: bool,

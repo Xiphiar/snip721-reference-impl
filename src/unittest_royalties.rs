@@ -170,6 +170,7 @@ mod tests {
         let query_msg = QueryMsg::RoyaltyInfo {
             token_id: None,
             viewer: None,
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         assert!(
@@ -198,6 +199,7 @@ mod tests {
                 address: HumanAddr("admin".to_string()),
                 viewing_key: "key".to_string(),
             }),
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         assert!(
@@ -248,6 +250,7 @@ mod tests {
         let query_msg = QueryMsg::RoyaltyInfo {
             token_id: None,
             viewer: None,
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         assert!(
@@ -368,6 +371,7 @@ mod tests {
         let query_msg = QueryMsg::RoyaltyInfo {
             token_id: None,
             viewer: None,
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         assert!(
@@ -447,6 +451,7 @@ mod tests {
         let query_msg = QueryMsg::RoyaltyInfo {
             token_id: None,
             viewer: None,
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         assert!(
@@ -468,6 +473,7 @@ mod tests {
                 address: admin.clone(),
                 viewing_key: admin_key.clone(),
             }),
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         assert!(
@@ -487,6 +493,7 @@ mod tests {
         let query_msg = QueryMsg::RoyaltyInfo {
             token_id: Some("NFT".to_string()),
             viewer: None,
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         assert!(
@@ -508,6 +515,7 @@ mod tests {
                 address: admin.clone(),
                 viewing_key: admin_key.clone(),
             }),
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         let error = extract_error_msg(query_result);
@@ -524,6 +532,7 @@ mod tests {
         let query_msg = QueryMsg::RoyaltyInfo {
             token_id: None,
             viewer: None,
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         assert!(
@@ -620,6 +629,7 @@ mod tests {
                 address: bob.clone(),
                 viewing_key: bob_key.clone(),
             }),
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         let query_answer: QueryAnswer = from_binary(&query_result.unwrap()).unwrap();
@@ -637,6 +647,7 @@ mod tests {
                 address: alice.clone(),
                 viewing_key: alice_key.clone(),
             }),
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         let query_answer: QueryAnswer = from_binary(&query_result.unwrap()).unwrap();
@@ -681,6 +692,7 @@ mod tests {
                 address: bob.clone(),
                 viewing_key: bob_key.clone(),
             }),
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         let query_answer: QueryAnswer = from_binary(&query_result.unwrap()).unwrap();
@@ -698,6 +710,7 @@ mod tests {
                 address: bob.clone(),
                 viewing_key: bob_key.clone(),
             }),
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -728,6 +741,7 @@ mod tests {
                 address: bob.clone(),
                 viewing_key: bob_key.clone(),
             }),
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -746,6 +760,7 @@ mod tests {
                 address: admin.clone(),
                 viewing_key: admin_key.clone(),
             }),
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         let query_answer: QueryAnswer = from_binary(&query_result.unwrap()).unwrap();
@@ -790,6 +805,7 @@ mod tests {
                 address: bob.clone(),
                 viewing_key: bob_key.clone(),
             }),
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -821,6 +837,7 @@ mod tests {
         let query_msg = QueryMsg::RoyaltyInfo {
             token_id: Some("specified".to_string()),
             viewer: None,
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         let query_answer: QueryAnswer = from_binary(&query_result.unwrap()).unwrap();
@@ -856,6 +873,7 @@ mod tests {
         let query_msg = QueryMsg::RoyaltyInfo {
             token_id: Some("NFT".to_string()),
             viewer: None,
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         let error = extract_error_msg(query_result);

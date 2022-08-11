@@ -301,6 +301,7 @@ mod tests {
         let query_msg = QueryMsg::RoyaltyInfo {
             token_id: None,
             viewer: None,
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         assert!(
@@ -382,6 +383,7 @@ mod tests {
         let query_msg = QueryMsg::RoyaltyInfo {
             token_id: Some("TrySetRoys".to_string()),
             viewer: None,
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         assert!(
@@ -401,6 +403,7 @@ mod tests {
         let query_msg = QueryMsg::RoyaltyInfo {
             token_id: Some("TryDefaultRoys".to_string()),
             viewer: None,
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         assert!(
@@ -713,6 +716,7 @@ mod tests {
         let query_msg = QueryMsg::NftDossier {
             token_id: "NFT1".to_string(),
             viewer: None,
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -733,6 +737,8 @@ mod tests {
                 private_metadata_is_public_expiration,
                 token_approvals,
                 inventory_approvals,
+                token_code_approvals,
+                inventory_code_approvals,
             } => {
                 assert_eq!(owner, Some(alice.clone()));
                 assert_eq!(public_metadata, Some(public_meta.clone()));
@@ -749,6 +755,8 @@ mod tests {
                 assert!(private_metadata_is_public_expiration.is_none());
                 assert!(token_approvals.is_none());
                 assert!(inventory_approvals.is_none());
+                assert!(token_code_approvals.is_none());
+                assert!(inventory_code_approvals.is_none());
             }
             _ => panic!("unexpected"),
         }

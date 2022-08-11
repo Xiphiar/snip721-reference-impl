@@ -230,6 +230,24 @@ pub enum HandleMsg {
         /// optional message length padding
         padding: Option<String>,
     },
+    /// add/remove approval(s) for a specific address on the token(s) you own.  Any permissions
+    /// that are omitted will keep the current permission setting for that whitelist address
+    SetCodeApproval {
+        /// address being granted/revoked permission
+        code: Option<String>,
+        /// optional token id to apply approval/revocation to
+        token_id: Option<String>,
+        /// optional permission level for viewing the owner
+        view_owner: Option<AccessLevel>,
+        /// optional permission level for viewing private metadata
+        view_private_metadata: Option<AccessLevel>,
+        /// optional permission level for transferring
+        transfer: Option<AccessLevel>,
+        /// optional expiration
+        expires: Option<Expiration>,
+        /// optional message length padding
+        padding: Option<String>,
+    },
     /// gives the spender permission to transfer the specified token.  If you are the owner
     /// of the token, you can use SetWhitelistedApproval to accomplish the same thing.  If
     /// you are an operator, you can only use Approve
@@ -695,6 +713,8 @@ pub enum QueryMsg {
         token_id: String,
         /// optional address and key requesting to view the private metadata
         viewer: Option<ViewerInfo>,
+        /// optional code to authenticate access
+        access_code: Option<String>,
     },
     /// displays all the information about a token that the viewer has permission to
     /// see.  This may include the owner, the public metadata, the private metadata, royalty
@@ -704,6 +724,8 @@ pub enum QueryMsg {
         token_id: String,
         /// optional address and key requesting to view the token information
         viewer: Option<ViewerInfo>,
+        /// optional code to authenticate access
+        access_code: Option<String>,
         /// optionally include expired Approvals in the response list.  If ommitted or
         /// false, expired Approvals will be filtered out of the response
         include_expired: Option<bool>,
@@ -716,6 +738,8 @@ pub enum QueryMsg {
         token_ids: Vec<String>,
         /// optional address and key requesting to view the token information
         viewer: Option<ViewerInfo>,
+        /// optional code to authenticate access
+        access_code: Option<String>,
         /// optionally include expired Approvals in the response list.  If ommitted or
         /// false, expired Approvals will be filtered out of the response
         include_expired: Option<bool>,
@@ -760,6 +784,8 @@ pub enum QueryMsg {
         owner: HumanAddr,
         /// optional address of the querier if different from the owner
         viewer: Option<HumanAddr>,
+        /// optional code to authenticate access
+        access_code: Option<String>,
         /// optional viewing key
         viewing_key: Option<String>,
         /// paginate by providing the last token_id received in the previous query
@@ -819,6 +845,8 @@ pub enum QueryMsg {
         token_id: Option<String>,
         /// optional address and key requesting to view the royalty information
         viewer: Option<ViewerInfo>,
+        /// optional code to authenticate access
+        access_code: Option<String>,
     },
     /// display the contract's creator
     ContractCreator {},
@@ -836,6 +864,19 @@ pub enum QueryMsg {
 pub struct Snip721Approval {
     /// whitelisted address
     pub address: HumanAddr,
+    /// optional expiration if the address has view owner permission
+    pub view_owner_expiration: Option<Expiration>,
+    /// optional expiration if the address has view private metadata permission
+    pub view_private_metadata_expiration: Option<Expiration>,
+    /// optional expiration if the address has transfer permission
+    pub transfer_expiration: Option<Expiration>,
+}
+
+/// SNIP721 Code Approval
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct Snip721CodeApproval {
+    /// whitelisted address
+    pub code: String,
     /// optional expiration if the address has view owner permission
     pub view_owner_expiration: Option<Expiration>,
     /// optional expiration if the address has view private metadata permission
@@ -882,6 +923,8 @@ pub struct BatchNftDossierElement {
     pub private_metadata_is_public_expiration: Option<Expiration>,
     pub token_approvals: Option<Vec<Snip721Approval>>,
     pub inventory_approvals: Option<Vec<Snip721Approval>>,
+    pub token_code_approvals: Option<Vec<Snip721CodeApproval>>,
+    pub inventory_code_approvals: Option<Vec<Snip721CodeApproval>>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
@@ -954,6 +997,8 @@ pub enum QueryAnswer {
         private_metadata_is_public_expiration: Option<Expiration>,
         token_approvals: Option<Vec<Snip721Approval>>,
         inventory_approvals: Option<Vec<Snip721Approval>>,
+        token_code_approvals: Option<Vec<Snip721CodeApproval>>,
+        inventory_code_approvals: Option<Vec<Snip721CodeApproval>>,
     },
     BatchNftDossier {
         nft_dossiers: Vec<BatchNftDossierElement>,

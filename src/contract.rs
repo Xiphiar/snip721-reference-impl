@@ -14,27 +14,29 @@ use secret_toolkit::{
     utils::{pad_handle_result, pad_query_result},
 };
 
-use crate::expiration::Expiration;
+use crate::{expiration::Expiration, utils::create_hashed_password};
 use crate::inventory::{Inventory, InventoryIter};
 use crate::mint_run::{SerialNumber, StoredMintRunInfo};
 use crate::msg::{
     AccessLevel, BatchNftDossierElement, Burn, ContractStatus, Cw721Approval, Cw721OwnerOfResponse,
     HandleAnswer, HandleMsg, InitMsg, Mint, QueryAnswer, QueryMsg, QueryWithPermit, ReceiverInfo,
-    ResponseStatus::Success, Send, Snip721Approval, Transfer, ViewerInfo,
+    ResponseStatus::Success, Send, Snip721Approval, Snip721CodeApproval, Transfer, ViewerInfo,
 };
-use crate::rand::sha_256;
+use crate::rand::{sha_256, Prng};
 use crate::receiver::{batch_receive_nft_msg, receive_nft_msg};
 use crate::royalties::{RoyaltyInfo, StoredRoyaltyInfo};
 use crate::state::{
     get_txs, json_may_load, json_save, load, may_load, remove, save, store_burn, store_mint,
-    store_transfer, AuthList, Config, Permission, PermissionType, ReceiveRegistration, BLOCK_KEY,
+    store_transfer, AuthList, CodeAuthList, Config, Permission, CodePermission, PermissionType, ReceiveRegistration, BLOCK_KEY,
     CONFIG_KEY, CREATOR_KEY, DEFAULT_ROYALTY_KEY, MINTERS_KEY, MY_ADDRESS_KEY,
-    PREFIX_ALL_PERMISSIONS, PREFIX_AUTHLIST, PREFIX_INFOS, PREFIX_MAP_TO_ID, PREFIX_MAP_TO_INDEX,
+    PREFIX_ALL_PERMISSIONS, PREFIX_ALL_CODE_PERMISSIONS, PREFIX_AUTHLIST, PREFIX_CODE_AUTHLIST, PREFIX_INFOS, PREFIX_MAP_TO_ID, PREFIX_MAP_TO_INDEX,
     PREFIX_MINT_RUN, PREFIX_MINT_RUN_NUM, PREFIX_OWNER_PRIV, PREFIX_PRIV_META, PREFIX_PUB_META,
     PREFIX_RECEIVERS, PREFIX_REVOKED_PERMITS, PREFIX_ROYALTY_INFO, PREFIX_VIEW_KEY, PRNG_SEED_KEY,
 };
 use crate::token::{Metadata, Token};
 use crate::viewing_key::{ViewingKey, VIEWING_KEY_SIZE};
+
+use std::fmt::Write;
 
 /// pad handle responses and log attributes to blocks of 256 bytes to prevent leaking info based on
 /// response size
@@ -261,6 +263,28 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             &config,
             ContractStatus::StopTransactions.to_u8(),
             &address,
+            token_id,
+            view_owner,
+            view_private_metadata,
+            transfer,
+            expires,
+            SetAppResp::SetWhitelistedApproval,
+        ),
+
+        HandleMsg::SetCodeApproval {
+            code,
+            token_id,
+            view_owner,
+            view_private_metadata,
+            transfer,
+            expires,
+            ..
+        } => set_code_approval(
+            deps,
+            env,
+            &config,
+            ContractStatus::StopTransactions.to_u8(),
+            code,
             token_id,
             view_owner,
             view_private_metadata,
@@ -1022,6 +1046,7 @@ pub fn set_global_approval<S: Storage, A: Api, Q: Querier>(
             Token {
                 owner: sender_raw.clone(),
                 permissions: Vec::new(),
+                code_permissions: Vec::new(),
                 unwrapped: false,
                 transferable: true,
             },
@@ -1113,6 +1138,7 @@ pub fn set_whitelisted_approval<S: Storage, A: Api, Q: Querier>(
             Token {
                 owner: sender_raw.clone(),
                 permissions: Vec::new(),
+                code_permissions: Vec::new(),
                 unwrapped: false,
                 transferable: true,
             },
@@ -1157,6 +1183,139 @@ pub fn set_whitelisted_approval<S: Storage, A: Api, Q: Querier>(
     };
     Ok(res)
 }
+
+/// Returns HandleResult
+///
+/// sets specified permissions for an address
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `config` - a reference to the Config
+/// * `priority` - u8 representation of highest status level this action is permitted at
+/// * `address` - a reference to the address being granted permission
+/// * `token_id` - optional token id to apply approvals to
+/// * `view_owner` - optional access level for viewing token ownership
+/// * `view_private_metadata` - optional access level for viewing private metadata
+/// * `transfer` - optional access level for transferring tokens
+/// * `expires` - optional Expiration for this approval
+/// * `response_type` - which response to return for SetWhitelistedApproval, ApproveAll, or RevokeAll
+#[allow(clippy::too_many_arguments)]
+pub fn set_code_approval<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    config: &Config,
+    priority: u8,
+    code: Option<String>,
+    token_id: Option<String>,
+    view_owner: Option<AccessLevel>,
+    view_private_metadata: Option<AccessLevel>,
+    transfer: Option<AccessLevel>,
+    expires: Option<Expiration>,
+    response_type: SetAppResp,
+) -> HandleResult {
+    check_status(config.status, priority)?;
+    let token_given: bool;
+    //let address_raw = deps.api.canonical_address(address)?;
+    let sender_raw = deps.api.canonical_address(&env.message.sender)?;
+    let mut custom_err = String::new();
+    let (token, idx) = if let Some(id) = token_id {
+        token_given = true;
+        custom_err = format!("You do not own token {}", id);
+        // if token supply is private, don't leak that the token id does not exist
+        // instead just say they do not own that token
+        let opt_err = if config.token_supply_is_public {
+            None
+        } else {
+            Some(&*custom_err)
+        };
+        get_token(&deps.storage, &id, opt_err)?
+    } else {
+        token_given = false;
+        (
+            Token {
+                owner: sender_raw.clone(),
+                permissions: Vec::new(),
+                code_permissions: Vec::new(),
+                unwrapped: false,
+                transferable: true,
+            },
+            0,
+        )
+    };
+    // if trying to set token permissions when you are not the owner
+    if token_given && token.owner != sender_raw {
+        return Err(StdError::generic_err(custom_err));
+    }
+    let mut accesses: [Option<AccessLevel>; 3] = [None, None, None];
+    accesses[PermissionType::ViewOwner.to_usize()] = view_owner;
+    accesses[PermissionType::ViewMetadata.to_usize()] = view_private_metadata;
+    accesses[PermissionType::Transfer.to_usize()] = transfer;
+    let mut proc_info = ProcessAccInfo {
+        token,
+        idx,
+        token_given,
+        accesses,
+        expires,
+        from_oper: false,
+    };
+
+    //For output purposes on completion
+    let mut code_string = String::new();
+
+    if code == None {
+        let prng_seed: Vec<u8> = load(&mut deps.storage, PRNG_SEED_KEY)?;
+        let random_seed  = new_entropy(&env,prng_seed.as_ref(),prng_seed.as_ref());
+        let half_seed = &random_seed[..16];
+        
+        for byte in half_seed {
+            write!(&mut code_string, "{:x}", byte).unwrap();
+        }
+    } else {
+        code_string = code.unwrap();
+    };
+
+    process_code_accesses(
+        &mut deps.storage,
+        &env,
+        &code_string,
+        &sender_raw,
+        &mut proc_info,
+        None,
+    )?;
+    let response = match response_type {
+        SetAppResp::SetWhitelistedApproval => {
+            HandleAnswer::SetWhitelistedApproval { status: Success }
+        }
+        SetAppResp::ApproveAll => HandleAnswer::ApproveAll { status: Success },
+        SetAppResp::RevokeAll => HandleAnswer::RevokeAll { status: Success },
+    };
+    let res = HandleResponse {
+        messages: vec![],
+        log: vec![
+            log("code", &code_string)
+        ],
+        data: Some(to_binary(&response)?),
+    };
+    Ok(res)
+}
+
+pub fn new_entropy(env: &Env, seed: &[u8], entropy: &[u8])-> [u8;32]{
+    // 16 here represents the lengths in bytes of the block height and time.
+    let entropy_len = 16 + env.message.sender.len() + entropy.len();
+    let mut rng_entropy = Vec::with_capacity(entropy_len);
+    rng_entropy.extend_from_slice(&env.block.height.to_be_bytes());
+    rng_entropy.extend_from_slice(&env.block.time.to_be_bytes());
+    rng_entropy.extend_from_slice(&env.message.sender.0.as_bytes());
+    rng_entropy.extend_from_slice(entropy);
+
+    let mut rng = Prng::new(seed, &rng_entropy);
+
+    rng.rand_bytes()
+}
+
+
 
 /// Returns HandleResult
 ///
@@ -1722,12 +1881,16 @@ pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryM
     let response = match msg {
         QueryMsg::ContractInfo {} => query_contract_info(&deps.storage),
         QueryMsg::ContractCreator {} => query_contract_creator(deps),
-        QueryMsg::RoyaltyInfo { token_id, viewer } => {
-            query_royalty(deps, token_id.as_deref(), viewer, None)
-        }
+        QueryMsg::RoyaltyInfo {
+            token_id,
+            viewer,
+            access_code
+        } =>  query_royalty(deps, token_id.as_deref(), viewer, access_code, None),
         QueryMsg::ContractConfig {} => query_config(&deps.storage),
         QueryMsg::Minters {} => query_minters(deps),
-        QueryMsg::NumTokens { viewer } => query_num_tokens(deps, viewer, None),
+        QueryMsg::NumTokens {
+            viewer,
+        } => query_num_tokens(deps, viewer, None),
         QueryMsg::AllTokens {
             viewer,
             start_after,
@@ -1739,8 +1902,8 @@ pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryM
             include_expired,
         } => query_owner_of(deps, &token_id, viewer, include_expired, None),
         QueryMsg::NftInfo { token_id } => query_nft_info(&deps.storage, &token_id),
-        QueryMsg::PrivateMetadata { token_id, viewer } => {
-            query_private_meta(deps, &token_id, viewer, None)
+        QueryMsg::PrivateMetadata { token_id, viewer, access_code } => {
+            query_private_meta(deps, &token_id, viewer, None, access_code)
         }
         QueryMsg::AllNftInfo {
             token_id,
@@ -1750,13 +1913,15 @@ pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryM
         QueryMsg::NftDossier {
             token_id,
             viewer,
+            access_code,
             include_expired,
-        } => query_nft_dossier(deps, token_id, viewer, include_expired, None),
+        } => query_nft_dossier(deps, token_id, viewer, access_code, include_expired, None),
         QueryMsg::BatchNftDossier {
             token_ids,
             viewer,
+            access_code,
             include_expired,
-        } => query_batch_nft_dossier(deps, token_ids, viewer, include_expired, None),
+        } => query_batch_nft_dossier(deps, token_ids, viewer, access_code, include_expired, None),
         QueryMsg::TokenApprovals {
             token_id,
             viewing_key,
@@ -1781,10 +1946,11 @@ pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryM
         QueryMsg::Tokens {
             owner,
             viewer,
+            access_code,
             viewing_key,
             start_after,
             limit,
-        } => query_tokens(deps, &owner, viewer, viewing_key, start_after, limit, None),
+        } => query_tokens(deps, &owner, viewer, access_code, viewing_key, start_after, limit, None),
         QueryMsg::NumTokensOfOwner {
             owner,
             viewer,
@@ -1860,19 +2026,19 @@ pub fn permit_queries<S: Storage, A: Api, Q: Querier>(
     // permit validated, process query
     match query {
         QueryWithPermit::RoyaltyInfo { token_id } => {
-            query_royalty(deps, token_id.as_deref(), None, Some(querier))
+            query_royalty(deps, token_id.as_deref(), None, None, Some(querier))
         }
         QueryWithPermit::PrivateMetadata { token_id } => {
-            query_private_meta(deps, &token_id, None, Some(querier))
+            query_private_meta(deps, &token_id, None, Some(querier), None)
         }
         QueryWithPermit::NftDossier {
             token_id,
             include_expired,
-        } => query_nft_dossier(deps, token_id, None, include_expired, Some(querier)),
+        } => query_nft_dossier(deps, token_id, None, None, include_expired, Some(querier)),
         QueryWithPermit::BatchNftDossier {
             token_ids,
             include_expired,
-        } => query_batch_nft_dossier(deps, token_ids, None, include_expired, Some(querier)),
+        } => query_batch_nft_dossier(deps, token_ids, None, None, include_expired, Some(querier)),
         QueryWithPermit::OwnerOf {
             token_id,
             include_expired,
@@ -1905,7 +2071,7 @@ pub fn permit_queries<S: Storage, A: Api, Q: Querier>(
             owner,
             start_after,
             limit,
-        } => query_tokens(deps, &owner, None, None, start_after, limit, Some(querier)),
+        } => query_tokens(deps, &owner, None, None, None, start_after, limit, Some(querier)),
         QueryWithPermit::NumTokensOfOwner { owner } => {
             query_num_owner_tokens(deps, &owner, None, None, Some(querier))
         }
@@ -1953,6 +2119,7 @@ pub fn query_royalty<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     token_id: Option<&str>,
     viewer: Option<ViewerInfo>,
+    access_code: Option<String>,
     from_permit: Option<CanonicalAddr>,
 ) -> QueryResult {
     let viewer_raw = get_querier(deps, viewer, from_permit)?;
@@ -1975,6 +2142,7 @@ pub fn query_royalty<S: Storage, A: Api, Q: Querier>(
                 PermissionType::Transfer.to_usize(),
                 &mut Vec::new(),
                 "",
+                access_code.as_ref()
             )
             .is_err();
             // get the royalty information if present
@@ -2195,6 +2363,7 @@ pub fn query_private_meta<S: Storage, A: Api, Q: Querier>(
     token_id: &str,
     viewer: Option<ViewerInfo>,
     from_permit: Option<CanonicalAddr>,
+    access_code: Option<String>,
 ) -> QueryResult {
     let prep_info = query_token_prep(deps, token_id, viewer, from_permit)?;
     check_perm_core(
@@ -2207,6 +2376,7 @@ pub fn query_private_meta<S: Storage, A: Api, Q: Querier>(
         PermissionType::ViewMetadata.to_usize(),
         &mut Vec::new(),
         &prep_info.err_msg,
+        access_code.as_ref()
     )?;
     // don't display if private metadata is sealed
     if !prep_info.token.unwrapped {
@@ -2265,10 +2435,11 @@ pub fn query_nft_dossier<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     token_id: String,
     viewer: Option<ViewerInfo>,
+    access_code: Option<String>,
     include_expired: Option<bool>,
     from_permit: Option<CanonicalAddr>,
 ) -> QueryResult {
-    let dossier = dossier_list(deps, vec![token_id], viewer, include_expired, from_permit)?
+    let dossier = dossier_list(deps, vec![token_id], viewer, access_code, include_expired, from_permit)?
         .pop()
         .ok_or_else(|| {
             StdError::generic_err("NftDossier can never return an empty dossier list")
@@ -2289,6 +2460,8 @@ pub fn query_nft_dossier<S: Storage, A: Api, Q: Querier>(
         private_metadata_is_public_expiration: dossier.private_metadata_is_public_expiration,
         token_approvals: dossier.token_approvals,
         inventory_approvals: dossier.inventory_approvals,
+        token_code_approvals: dossier.token_code_approvals,
+        inventory_code_approvals: dossier.inventory_code_approvals,
     })
 }
 
@@ -2308,10 +2481,11 @@ pub fn query_batch_nft_dossier<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     token_ids: Vec<String>,
     viewer: Option<ViewerInfo>,
+    access_code: Option<String>,
     include_expired: Option<bool>,
     from_permit: Option<CanonicalAddr>,
 ) -> QueryResult {
-    let nft_dossiers = dossier_list(deps, token_ids, viewer, include_expired, from_permit)?;
+    let nft_dossiers = dossier_list(deps, token_ids, viewer, access_code, include_expired, from_permit)?;
 
     to_binary(&QueryAnswer::BatchNftDossier { nft_dossiers })
 }
@@ -2545,6 +2719,7 @@ pub fn query_tokens<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     owner: &HumanAddr,
     viewer: Option<HumanAddr>,
+    access_code: Option<String>,
     viewing_key: Option<String>,
     start_after: Option<String>,
     limit: Option<u32>,
@@ -2663,6 +2838,7 @@ pub fn query_tokens<S: Storage, A: Api, Q: Querier>(
                 exp_idx,
                 may_oper_vec.as_mut().unwrap_or(&mut oper_for),
                 &unauth_err,
+                access_code.as_ref()
             )?;
             // if querier is found to have ALL permission for the specified owner, no need to check permission ever again
             if !oper_for.is_empty() {
@@ -2690,6 +2866,7 @@ pub fn query_tokens<S: Storage, A: Api, Q: Querier>(
                         exp_idx,
                         &mut oper_for,
                         "",
+                        access_code.as_ref()
                     )
                     .is_ok();
                     // if querier is found to have ALL permission, no need to check permission ever again
@@ -3299,6 +3476,69 @@ fn gen_snip721_approvals<A: Api>(
     Ok((approvals, owner_public, meta_public))
 }
 
+
+/// Returns StdResult<(Vec<Snip721Approval>, Option<Expiration>, Option<Expiration>)>
+/// which is the list of approvals, an optional Expiration if ownership is public, and
+/// an optional Expiration if the private metadata is public
+///
+/// # Arguments
+///
+/// * `api` - reference to the Api used to convert canonical and human addresses
+/// * `block` - a reference to the current BlockInfo
+/// * `perm_list` - a mutable reference to the list of Permission
+/// * `include_expired` - true if the Approval list should include expired Approvals
+/// * `perm_type_info` - a reference to PermissionTypeInfo
+fn gen_snip721_code_approvals<A: Api>(
+    api: &A,
+    block: &BlockInfo,
+    perm_list: &mut Vec<CodePermission>,
+    include_expired: bool,
+    perm_type_info: &PermissionTypeInfo,
+) -> StdResult<(Vec<Snip721CodeApproval>, Option<Expiration>, Option<Expiration>)> {
+    let global_raw = "public".as_bytes();
+    let mut approvals: Vec<Snip721CodeApproval> = Vec::new();
+    let mut owner_public: Option<Expiration> = None;
+    let mut meta_public: Option<Expiration> = None;
+    for perm in perm_list {
+        // set global permissions if present
+        if perm.code.as_bytes() == global_raw {
+            if let Some(exp) = perm.expirations[perm_type_info.view_owner_idx] {
+                if !exp.is_expired(block) {
+                    owner_public = Some(exp);
+                }
+            }
+            if let Some(exp) = perm.expirations[perm_type_info.view_meta_idx] {
+                if !exp.is_expired(block) {
+                    meta_public = Some(exp);
+                }
+            }
+        // otherwise create the approval summary
+        } else {
+            let mut has_some = false;
+            for i in 0..perm_type_info.num_types {
+                perm.expirations[i] =
+                    perm.expirations[i].filter(|e| include_expired || !e.is_expired(block));
+                if !has_some && perm.expirations[i].is_some() {
+                    has_some = true;
+                }
+            }
+            if has_some {
+                approvals.push(Snip721CodeApproval {
+                    code: perm.code.clone(),
+                    view_owner_expiration: perm.expirations[perm_type_info.view_owner_idx].take(),
+                    view_private_metadata_expiration: perm.expirations
+                        [perm_type_info.view_meta_idx]
+                        .take(),
+                    transfer_expiration: perm.expirations[perm_type_info.transfer_idx].take(),
+                });
+            }
+        }
+    }
+    Ok((approvals, owner_public, meta_public))
+}
+
+
+
 /// Returns StdResult<()>
 ///
 /// returns Ok if authorized to view token supply, Err otherwise
@@ -3405,6 +3645,7 @@ pub fn check_permission<S: Storage, A: Api, Q: Querier>(
         exp_idx,
         oper_for,
         custom_err,
+        None
     )
 }
 
@@ -3434,12 +3675,14 @@ fn check_perm_core<S: Storage, A: Api, Q: Querier>(
     exp_idx: usize,
     oper_for: &mut Vec<CanonicalAddr>,
     custom_err: &str,
+    access_code: Option<&String>,
 ) -> StdResult<()> {
     // if did not already pass with "all" permission for this owner
     if !oper_for.contains(&token.owner) {
         let mut err_msg = custom_err;
         let mut expired_msg = String::new();
         let global_raw = CanonicalAddr(Binary::from(b"public"));
+        let global_raw_string = "public".as_bytes();
         let (sender, only_public) = if let Some(sdr) = opt_sender {
             (sdr, false)
         } else {
@@ -3449,13 +3692,69 @@ fn check_perm_core<S: Storage, A: Api, Q: Querier>(
         if token.owner == *sender {
             return Ok(());
         }
-        // check if the token is public or the sender has token permission.
-        // Can't use find because even if the global or sender permission expired, you
-        // still want to see if the other is still valid, but if we are only checking for public
+
+
+        if let Some(code) = access_code {
+            //token perms
+            for perm in &token.code_permissions {
+                if perm.code == *code {
+                    if let Some(exp) = perm.expirations[exp_idx] {
+                        if !exp.is_expired(block) {
+                            return Ok(());
+                        // if the permission is expired
+                        } else {
+                            expired_msg
+                                .push_str(&format!("Access to token {} has expired", token_id));
+                            err_msg = &expired_msg;
+                        }
+                    }
+                    // we can quit if we found both the sender and the global (or only checking global)
+                    // if found_one {
+                    //     break;
+                    // } else {
+                    //     found_one = true;
+                    // }
+                }
+            }
+
+            let all_code_store = ReadonlyPrefixedStorage::new(PREFIX_ALL_CODE_PERMISSIONS, &deps.storage);
+            let may_code_list: Option<Vec<CodePermission>> = json_may_load(&all_code_store, owner_slice)?;
+            //found_one = only_public;
+            if let Some(list) = may_code_list {
+                for perm in &list {
+                    if perm.code == *code {
+                        if let Some(exp) = perm.expirations[exp_idx] {
+                            if !exp.is_expired(block) {
+                                oper_for.push(token.owner.clone());
+                                return Ok(());
+                            // if the permission expired let them know the permission expired
+                            } else {
+                                expired_msg.push_str(&format!(
+                                    "Access to all tokens of {} has expired",
+                                    &deps.api.human_address(&token.owner)?
+                                ));
+                                err_msg = &expired_msg;
+                            }
+                        }
+                        // we can quit if we found both the sender and the global (or only checking global)
+                        // if found_one {
+                        //     return Err(StdError::generic_err(err_msg));
+                        // } else {
+                        //     found_one = true;
+                        // }
+                    }
+                }
+            }    
+        }
+
         // we can quit after one failure
         let mut one_expired = only_public;
         // if we are only checking for public permission, we can quit after one failure
         let mut found_one = only_public;
+
+        // check if the token is public or the sender has token permission.
+        // Can't use find because even if the global or sender permission expired, you
+        // still want to see if the other is still valid, but if we are only checking for public
         for perm in &token.permissions {
             if perm.address == *sender || perm.address == global_raw {
                 if let Some(exp) = perm.expirations[exp_idx] {
@@ -4024,6 +4323,331 @@ fn process_accesses<S: Storage>(
     Ok(())
 }
 
+/// Returns StdResult<()>
+///
+/// sets specified permissions for an address
+///
+/// # Arguments
+///
+/// * `storage` - a mutable reference to the contract's storage
+/// * `env` - a reference to the Env of the contract's environment
+/// * `address` - a reference to the address being granted/revoked permission
+/// * `owner` - a reference to the permission owner's address
+/// * `proc_info` - a mutable reference to the ProcessAccInfo
+/// * `all_perm_in` - when from an operator, the all_perms have already been read
+fn process_code_accesses<S: Storage>(
+    storage: &mut S,
+    env: &Env,
+    code: &String,
+    owner: &CanonicalAddr,
+    proc_info: &mut ProcessAccInfo,
+    all_perm_in: Option<Vec<CodePermission>>,
+) -> StdResult<()> { // Permission
+    let owner_slice = owner.as_slice();
+    let expiration = proc_info.expires.unwrap_or_default();
+    let expirations = vec![expiration; 3];
+    let mut alt_all_perm = AlterPermTable::default();
+    let mut alt_tok_perm = AlterPermTable::default();
+    let mut alt_load_tok_perm = AlterPermTable::default();
+    let mut alt_auth_list = AlterAuthTable::default();
+    let mut add_load_list = Vec::new();
+    let mut load_all = false;
+    let mut load_all_exp = vec![Expiration::AtHeight(0); 3];
+    let mut all_perm = if proc_info.from_oper {
+        all_perm_in.ok_or_else(|| StdError::generic_err("Unable to get operator list"))?
+    } else {
+        Vec::new()
+    };
+    let mut oper_pos = 0usize;
+    let mut found_perm = false;
+    let mut tried_oper = false;
+    let num_perm_types = PermissionType::ViewOwner.num_types();
+
+    // do every permission type
+    for i in 0..num_perm_types {
+        if let Some(acc) = &proc_info.accesses[i] {
+            match acc {
+                AccessLevel::ApproveToken | AccessLevel::RevokeToken => {
+                    if !proc_info.token_given {
+                        return Err(StdError::generic_err(
+                            "Attempted to grant/revoke permission for a token, but did not specify a token ID",
+                        ));
+                    }
+                    let is_approve = matches!(acc, AccessLevel::ApproveToken);
+                    // load the "all" permissions if we haven't already and see if the code is there
+                    if !tried_oper {
+                        if !proc_info.from_oper {
+                            let all_store =
+                                ReadonlyPrefixedStorage::new(PREFIX_ALL_CODE_PERMISSIONS, storage);
+                            all_perm = json_may_load(&all_store, owner_slice)?.unwrap_or_default();
+                        }
+                        if let Some(pos) = all_perm.iter().position(|p| p.code == *code) {
+                            found_perm = true;
+                            oper_pos = pos;
+                        }
+                        tried_oper = true;
+                    }
+                    // if this address has "all" permission
+                    if found_perm {
+                        if let Some(op) = all_perm.get(oper_pos) {
+                            if let Some(exp) = op.expirations[i] {
+                                if !exp.is_expired(&env.block) {
+                                    // don't allow one operator to change to another
+                                    // operator's permissions
+                                    if proc_info.from_oper {
+                                        // if adding, don't do anything
+                                        if is_approve {
+                                            return Ok(());
+                                        // if revoking, throw error
+                                        } else {
+                                            return Err(StdError::generic_err(
+                                                "Can not revoke transfer permission from an existing operator",
+                                            ));
+                                        }
+                                    }
+                                    // if you are granting token approval to an existing
+                                    // operator, but not changing the expiration, nothing
+                                    // needs to be done
+                                    if is_approve && expirations[i] == exp {
+                                        continue;
+                                    }
+                                    // need to put all the other tokens in the AuthList
+                                    alt_auth_list.full[i] = true;
+                                    // going to load all the other tokens
+                                    load_all = true;
+                                    // and use the "all" expiration as the token permission expirations
+                                    load_all_exp[i] = exp;
+                                    // add this address to all the other token permissions
+                                    alt_load_tok_perm.add[i] = true;
+                                    alt_load_tok_perm.has_update = true;
+                                }
+                                // remove "all" permission
+                                alt_all_perm.remove[i] = true;
+                                alt_all_perm.has_update = true;
+                            }
+                        }
+                    }
+                    if is_approve {
+                        // add permission for this token
+                        alt_tok_perm.add[i] = true;
+                        // add this token to the authList
+                        alt_auth_list.add[i] = true;
+                    } else {
+                        // revoke permission for this token
+                        alt_tok_perm.remove[i] = true;
+                        // remove this token from the AuthList
+                        alt_auth_list.remove[i] = true;
+                    }
+                    alt_tok_perm.has_update = true;
+                    alt_auth_list.has_update = true;
+                }
+                AccessLevel::All | AccessLevel::None => {
+                    if let AccessLevel::All = acc {
+                        // add "all" permission
+                        alt_all_perm.add[i] = true;
+                    } else {
+                        // remove "all" permission
+                        alt_all_perm.remove[i] = true;
+                    }
+                    alt_all_perm.has_update = true;
+                    // clear the AuthList
+                    alt_auth_list.clear[i] = true;
+                    alt_auth_list.has_update = true;
+                    // if a token was specified
+                    if proc_info.token_given {
+                        // also remove that token permission
+                        alt_tok_perm.remove[i] = true;
+                        alt_tok_perm.has_update = true;
+                    }
+                    // remove all other token permissions
+                    alt_load_tok_perm.remove[i] = true;
+                    alt_load_tok_perm.has_update = true;
+                    // if not already going to load every owned token
+                    if !load_all {
+                        // load the AuthList tokens for this permission type
+                        add_load_list.push(i);
+                    }
+                }
+            }
+        }
+    }
+    // update "all" permissions
+    if alt_all_perm.has_update {
+        // load "all" permissions if we haven't already
+        if !tried_oper {
+            let all_store = ReadonlyPrefixedStorage::new(PREFIX_ALL_CODE_PERMISSIONS, storage);
+            all_perm = json_may_load(&all_store, owner_slice)?.unwrap_or_default();
+        }
+        // if there was an update to the "all" permissions
+        if alter_code_perm_list(
+            &mut all_perm,
+            &alt_all_perm,
+            code,
+            &expirations,
+            num_perm_types,
+        ) {
+            let mut all_store = PrefixedStorage::new(PREFIX_ALL_CODE_PERMISSIONS, storage);
+            // if deleted last permitted address
+            if all_perm.is_empty() {
+                remove(&mut all_store, owner_slice);
+            } else {
+                json_save(&mut all_store, owner_slice, &all_perm)?;
+            }
+        }
+    }
+    // update input token permissions.
+    // Shouldn't need to check if token was given because if it wasn't we would have thrown an
+    // error before setting the has_update flag, but let's include the check anyway
+    if alt_tok_perm.has_update && proc_info.token_given {
+        // if there was an update to the token permissions
+        if alter_code_perm_list(
+            &mut proc_info.token.code_permissions,
+            &alt_tok_perm,
+            code,
+            &expirations,
+            num_perm_types,
+        ) {
+            let mut info_store = PrefixedStorage::new(PREFIX_INFOS, storage);
+            json_save(
+                &mut info_store,
+                &proc_info.idx.to_le_bytes(),
+                &proc_info.token,
+            )?;
+        }
+    }
+    // update the owner's AuthLists
+    if alt_auth_list.has_update {
+        // get the AuthLists for this address
+        let auth_store = ReadonlyPrefixedStorage::new(PREFIX_CODE_AUTHLIST, storage);
+        let mut auth_list: Vec<CodeAuthList> = may_load(&auth_store, owner_slice)?.unwrap_or_default();
+        let mut new_auth = CodeAuthList {
+            code: code.clone(),
+            tokens: [Vec::new(), Vec::new(), Vec::new()],
+        };
+        let (auth, found, pos) =
+            if let Some(pos) = auth_list.iter().position(|a| a.code == *code) {
+                if let Some(a) = auth_list.get_mut(pos) {
+                    (a, true, pos)
+                // shouldn't ever find it but not successfully get it, so this should never happen
+                } else {
+                    (&mut new_auth, false, 0usize)
+                }
+            // didn't find the address in the permission list
+            } else {
+                (&mut new_auth, false, 0usize)
+            };
+        let load_list: HashSet<u32> = if alt_load_tok_perm.has_update {
+            // if we need to load other tokens create the load list
+            // if we are loading all the owner's other tokens
+            let list = if load_all {
+                let inv = Inventory::new(storage, owner.clone())?;
+                let mut set = inv.to_set(storage)?;
+                // above, we already processed the input token, so remove it from the load list
+                set.remove(&proc_info.idx);
+                set
+            // just loading the tokens in the appropriate AuthList
+            } else {
+                let mut set: HashSet<u32> = HashSet::new();
+                for l in add_load_list {
+                    set.extend(auth.tokens[l].iter());
+                }
+                // don't load the input token if given
+                if proc_info.token_given {
+                    set.remove(&proc_info.idx);
+                }
+                set
+            };
+            let mut info_store = PrefixedStorage::new(PREFIX_INFOS, storage);
+            for t_i in &list {
+                let tok_key = t_i.to_le_bytes();
+                let may_tok: Option<Token> = json_may_load(&info_store, &tok_key)?;
+                if let Some(mut load_tok) = may_tok {
+                    // shouldn't ever fail this ownership check, but let's be safe
+                    if load_tok.owner == *owner
+                        && alter_code_perm_list(
+                            &mut load_tok.code_permissions,
+                            &alt_load_tok_perm,
+                            code,
+                            &load_all_exp,
+                            num_perm_types,
+                        )
+                    {
+                        json_save(&mut info_store, &tok_key, &load_tok)?;
+                    }
+                }
+            }
+            list
+        } else {
+            HashSet::new()
+        };
+        let mut updated = false;
+        // do for each PermissionType
+        for i in 0..num_perm_types {
+            // if revoked all individual token permissions
+            if alt_auth_list.clear[i] {
+                if !auth.tokens[i].is_empty() {
+                    auth.tokens[i].clear();
+                    updated = true;
+                }
+            // else if gave permission to all individual tokens (except the input token)
+            } else if alt_auth_list.full[i] {
+                auth.tokens[i] = load_list.iter().copied().collect();
+                // if this was an ApproveToken done to an address with ALL permission
+                // also add the specified token
+                if alt_auth_list.add[i] {
+                    auth.tokens[i].push(proc_info.idx);
+                }
+                updated = true;
+            // else if just adding the input token (shouldn't need the token_given check)
+            } else if alt_auth_list.add[i] && proc_info.token_given {
+                if !auth.tokens[i].contains(&proc_info.idx) {
+                    auth.tokens[i].push(proc_info.idx);
+                    updated = true;
+                }
+            // else if just revoking perm on the input token (don't need the token_given check)
+            } else if alt_auth_list.remove[i] && proc_info.token_given {
+                if let Some(tok_pos) = auth.tokens[i].iter().position(|&t| t == proc_info.idx) {
+                    auth.tokens[i].swap_remove(tok_pos);
+                    updated = true;
+                }
+            }
+        }
+        // if a change was made
+        if updated {
+            let mut auth_store = PrefixedStorage::new(PREFIX_CODE_AUTHLIST, storage);
+            let mut save_it = true;
+            // if the address has no authorized tokens
+            if auth.tokens.iter().all(|t| t.is_empty()) {
+                // and it was a pre-existing AuthList
+                if found {
+                    // if it was the only authorized address,
+                    // remove the storage entry
+                    if auth_list.len() == 1 {
+                        remove(&mut auth_store, owner_slice);
+                        save_it = false;
+                    } else {
+                        auth_list.swap_remove(pos);
+                    }
+                // address had no previous authorization so no need to add it
+                } else {
+                    save_it = false;
+                }
+            // AuthList has data, so save it
+            } else {
+                // if it is a new address, add it to the list
+                if !found {
+                    auth_list.push(new_auth);
+                }
+            }
+            if save_it {
+                save(&mut auth_store, owner_slice, &auth_list)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+
 /// Returns bool
 ///
 /// adds or removes permissions for an address based on the alterations table
@@ -4048,6 +4672,80 @@ fn alter_perm_list(
         expirations: [None; 3],
     };
     let (perm, found, pos) = if let Some(pos) = perms.iter().position(|p| p.address == *address) {
+        if let Some(p) = perms.get_mut(pos) {
+            (p, true, pos)
+        // shouldn't ever find it but not successfully get it, so this should never happen
+        } else {
+            (&mut new_perm, false, 0usize)
+        }
+    // didn't find the address in the permission list
+    } else {
+        (&mut new_perm, false, 0usize)
+    };
+    // do for each PermissionType
+    #[allow(clippy::needless_range_loop)]
+    for i in 0..num_perm_types {
+        // if supposed to add permission
+        if alter_table.add[i] {
+            // if it already has permission for this type
+            if let Some(old_exp) = perm.expirations[i] {
+                // if the new expiration is different
+                if old_exp != expiration[i] {
+                    perm.expirations[i] = Some(expiration[i]);
+                    updated = true;
+                }
+            // new permission
+            } else {
+                perm.expirations[i] = Some(expiration[i]);
+                updated = true;
+            }
+        // otherwise if we are supposed to remove permission
+        } else if alter_table.remove[i] {
+            // if it has permission for this type
+            if perm.expirations[i].is_some() {
+                // remove it
+                perm.expirations[i] = None;
+                updated = true;
+            }
+        }
+    }
+    // if a change was made
+    if updated {
+        // if this address had no permissions to start
+        if !found {
+            perms.push(new_perm);
+        // if the last permission got revoked
+        } else if perm.expirations.iter().all(|&e| e.is_none()) {
+            perms.swap_remove(pos);
+        }
+    }
+    updated
+}
+
+/// Returns bool
+///
+/// adds or removes permissions for an address based on the alterations table
+///
+/// # Arguments
+///
+/// * `perms` - a mutable reference to the list of permissions
+/// * `alter_table` - a reference to the AlterPermTable to drive the Permission changes
+/// * `address` - a reference to the address being added/revoked permission
+/// * `expiration` - slice of Expirations for each PermissionType
+/// * `num_perm_types` - the number of permission types
+fn alter_code_perm_list(
+    perms: &mut Vec<CodePermission>,
+    alter_table: &AlterPermTable,
+    code: &String,
+    expiration: &[Expiration],
+    num_perm_types: usize,
+) -> bool {
+    let mut updated = false;
+    let mut new_perm = CodePermission {
+        code: code.clone(),
+        expirations: [None; 3],
+    };
+    let (perm, found, pos) = if let Some(pos) = perms.iter().position(|p| p.code == *code) {
         if let Some(p) = perms.get_mut(pos) {
             (p, true, pos)
         // shouldn't ever find it but not successfully get it, so this should never happen
@@ -4583,6 +5281,7 @@ fn mint_list<S: Storage, A: Api, Q: Querier>(
         let token = Token {
             owner: recipient.clone(),
             permissions: Vec::new(),
+            code_permissions: Vec::new(),
             unwrapped: !config.sealed_metadata_is_enabled,
             transferable,
         };
@@ -4776,10 +5475,17 @@ pub struct OwnerInfo {
     pub owner_is_public: bool,
     // inventory approvals
     pub inventory_approvals: Vec<Snip721Approval>,
+
     // expiration for global view_owner approval if applicable
     pub view_owner_exp: Option<Expiration>,
     // expiration for global view_private_metadata approval if applicable
     pub view_meta_exp: Option<Expiration>,
+        // code approvals
+        pub inventory_code_approvals: Vec<Snip721CodeApproval>,
+            // expiration for global view_owner approval if applicable
+    pub view_code_owner_exp: Option<Expiration>,
+    // expiration for global view_private_metadata approval if applicable
+    pub view_code_meta_exp: Option<Expiration>,
 }
 
 /// Returns StdResult<Vec<BatchNftDossierElement>> of all the token information the querier is permitted to
@@ -4798,6 +5504,7 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     token_ids: Vec<String>,
     viewer: Option<ViewerInfo>,
+    access_code: Option<String>,
     include_expired: Option<bool>,
     from_permit: Option<CanonicalAddr>,
 ) -> StdResult<Vec<BatchNftDossierElement>> {
@@ -4834,6 +5541,7 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
     let roy_store = ReadonlyPrefixedStorage::new(PREFIX_ROYALTY_INFO, &deps.storage);
     let run_store = ReadonlyPrefixedStorage::new(PREFIX_MINT_RUN, &deps.storage);
     let all_store = ReadonlyPrefixedStorage::new(PREFIX_ALL_PERMISSIONS, &deps.storage);
+    let all_code_store = ReadonlyPrefixedStorage::new(PREFIX_ALL_CODE_PERMISSIONS, &deps.storage);
 
     for id in token_ids.into_iter() {
         let err_msg = format!(
@@ -4857,14 +5565,21 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
                 may_load(&own_priv_store, owner_slice)?.unwrap_or(config.owner_is_public);
             let mut all_perm: Vec<Permission> =
                 json_may_load(&all_store, owner_slice)?.unwrap_or_default();
+            let mut all_code_perm: Vec<CodePermission> =
+                json_may_load(&all_code_store, owner_slice)?.unwrap_or_default();
             let (inventory_approvals, view_owner_exp, view_meta_exp) =
                 gen_snip721_approvals(&deps.api, &block, &mut all_perm, incl_exp, &perm_type_info)?;
+            let (inventory_code_approvals, view_code_owner_exp, view_code_meta_exp) =
+                gen_snip721_code_approvals(&deps.api, &block, &mut all_code_perm, incl_exp, &perm_type_info)?;
             owner_cache.push(OwnerInfo {
                 owner: token.owner.clone(),
                 owner_is_public,
                 inventory_approvals,
                 view_owner_exp,
                 view_meta_exp,
+                inventory_code_approvals,
+                view_code_owner_exp,
+                view_code_meta_exp
             });
             owner_cache.last().ok_or_else(|| {
                 StdError::generic_err("This can't happen since we just pushed an OwnerInfo!")
@@ -4883,6 +5598,7 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
                 perm_type_info.view_owner_idx,
                 &mut owner_oper_for,
                 &err_msg,
+                access_code.as_ref()
             )
             .is_ok()
         {
@@ -4905,6 +5621,7 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
             perm_type_info.view_meta_idx,
             &mut meta_oper_for,
             &err_msg,
+            access_code.as_ref()
         ) {
             if let StdError::GenericErr { msg, .. } = err {
                 display_private_metadata_error = Some(msg);
@@ -4933,6 +5650,7 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
                     perm_type_info.transfer_idx,
                     &mut xfer_oper_for,
                     &err_msg,
+                    access_code.as_ref()
                 )
                 .is_err();
                 r.to_human(&deps.api, hide_addr)
@@ -4945,6 +5663,14 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
             &deps.api,
             &block,
             &mut token.permissions,
+            incl_exp,
+            &perm_type_info,
+        )?;
+
+        let (code_approv, code_owner_exp, code_meta_exp) = gen_snip721_code_approvals(
+            &deps.api,
+            &block,
+            &mut token.code_permissions,
             incl_exp,
             &perm_type_info,
         )?;
@@ -4970,14 +5696,16 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
                 )
             };
         // if the viewer is the owner, display the approvals
-        let (token_approvals, inventory_approvals) = opt_viewer.map_or((None, None), |v| {
+        let (token_approvals, inventory_approvals, token_code_approvals, inventory_code_approvals) = opt_viewer.map_or((None, None, None, None), |v| {
             if token.owner == *v {
                 (
                     Some(token_approv),
                     Some(owner_inf.inventory_approvals.clone()),
+                    Some(code_approv),
+                    Some(owner_inf.inventory_code_approvals.clone()),
                 )
             } else {
-                (None, None)
+                (None, None, None, None)
             }
         });
         dossiers.push(BatchNftDossierElement {
@@ -4995,7 +5723,9 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
             private_metadata_is_public,
             private_metadata_is_public_expiration,
             token_approvals,
+            token_code_approvals,
             inventory_approvals,
+            inventory_code_approvals
         });
     }
     Ok(dossiers)

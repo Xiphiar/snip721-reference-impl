@@ -718,6 +718,7 @@ mod tests {
         let query_msg = QueryMsg::NftDossier {
             token_id: "NFT1".to_string(),
             viewer: None,
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -736,6 +737,7 @@ mod tests {
         let query_msg = QueryMsg::NftDossier {
             token_id: "NFT1".to_string(),
             viewer: None,
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -821,6 +823,7 @@ mod tests {
         let query_msg = QueryMsg::NftDossier {
             token_id: "NFT1".to_string(),
             viewer: None,
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -841,6 +844,8 @@ mod tests {
                 private_metadata_is_public_expiration,
                 token_approvals,
                 inventory_approvals,
+                token_code_approvals,
+                inventory_code_approvals,
             } => {
                 assert_eq!(owner, Some(alice.clone()));
                 assert_eq!(public_metadata, Some(public_meta.clone()));
@@ -857,6 +862,8 @@ mod tests {
                 assert!(private_metadata_is_public_expiration.is_none());
                 assert!(token_approvals.is_none());
                 assert!(inventory_approvals.is_none());
+                assert!(token_code_approvals.is_none());
+                assert!(inventory_code_approvals.is_none());
             }
             _ => panic!("unexpected"),
         }
@@ -925,6 +932,7 @@ mod tests {
         let query_msg = QueryMsg::NftDossier {
             token_id: "NFT1".to_string(),
             viewer: None,
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -945,6 +953,8 @@ mod tests {
                 private_metadata_is_public_expiration,
                 token_approvals,
                 inventory_approvals,
+                token_code_approvals,
+                inventory_code_approvals
             } => {
                 assert_eq!(owner, Some(alice.clone()));
                 assert_eq!(public_metadata, Some(public_meta.clone()));
@@ -1026,6 +1036,7 @@ mod tests {
         let query_msg = QueryMsg::NftDossier {
             token_id: "NFT1".to_string(),
             viewer: None,
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -1046,6 +1057,8 @@ mod tests {
                 private_metadata_is_public_expiration,
                 token_approvals,
                 inventory_approvals,
+                token_code_approvals,
+                inventory_code_approvals
             } => {
                 assert_eq!(owner, Some(alice.clone()));
                 assert_eq!(public_metadata, Some(public_meta.clone()));
@@ -1130,6 +1143,7 @@ mod tests {
         let query_msg = QueryMsg::NftDossier {
             token_id: "NFT1".to_string(),
             viewer: Some(viewer.clone()),
+            access_code: None,
             include_expired: Some(true),
         };
         let query_result = query(&deps, query_msg);
@@ -1150,6 +1164,8 @@ mod tests {
                 private_metadata_is_public_expiration,
                 token_approvals,
                 inventory_approvals,
+                token_code_approvals,
+                inventory_code_approvals
             } => {
                 assert_eq!(owner, Some(alice.clone()));
                 assert_eq!(public_metadata, Some(public_meta.clone()));
@@ -1176,6 +1192,7 @@ mod tests {
         let query_msg = QueryMsg::NftDossier {
             token_id: "NFT1".to_string(),
             viewer: Some(viewer.clone()),
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -1196,6 +1213,8 @@ mod tests {
                 private_metadata_is_public_expiration,
                 token_approvals,
                 inventory_approvals,
+                token_code_approvals,
+                inventory_code_approvals
             } => {
                 assert_eq!(owner, Some(alice.clone()));
                 assert_eq!(public_metadata, Some(public_meta.clone()));
@@ -1227,6 +1246,7 @@ mod tests {
         let query_msg = QueryMsg::NftDossier {
             token_id: "NFT1".to_string(),
             viewer: Some(viewer.clone()),
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -1309,6 +1329,7 @@ mod tests {
                 address: alice.clone(),
                 viewing_key: "key".to_string(),
             }),
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -1329,6 +1350,8 @@ mod tests {
                 private_metadata_is_public_expiration,
                 token_approvals,
                 inventory_approvals,
+                token_code_approvals,
+                inventory_code_approvals
             } => {
                 assert_eq!(owner, Some(alice.clone()));
                 assert_eq!(public_metadata, Some(public_meta.clone()));
@@ -1364,6 +1387,7 @@ mod tests {
                 address: charlie.clone(),
                 viewing_key: "ckey".to_string(),
             }),
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -1384,6 +1408,8 @@ mod tests {
                 private_metadata_is_public_expiration,
                 token_approvals,
                 inventory_approvals,
+                token_code_approvals,
+                inventory_code_approvals
             } => {
                 assert!(owner.is_none());
                 assert_eq!(public_metadata, Some(public_meta.clone()));
@@ -1529,6 +1555,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: alice.clone(),
             viewer: None,
+            access_code: None,
             viewing_key: None,
             start_after: None,
             limit: Some(30),
@@ -1554,6 +1581,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: alice.clone(),
             viewer: None,
+            access_code: None,
             viewing_key: None,
             start_after: Some("NFT10".to_string()),
             limit: Some(30),
@@ -1566,6 +1594,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: alice.clone(),
             viewer: None,
+            access_code: None,
             viewing_key: None,
             start_after: Some("NFT7".to_string()),
             limit: Some(30),
@@ -1578,6 +1607,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: alice.clone(),
             viewer: None,
+            access_code: None,
             viewing_key: None,
             start_after: None,
             limit: Some(0),
@@ -1595,6 +1625,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: alice.clone(),
             viewer: None,
+            access_code: None,
             viewing_key: None,
             start_after: Some("NFT3".to_string()),
             limit: Some(1),
@@ -1642,6 +1673,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: alice.clone(),
             viewer: None,
+            access_code: None,
             viewing_key: None,
             start_after: None,
             limit: None,
@@ -1660,6 +1692,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: alice.clone(),
             viewer: Some(bob.clone()),
+            access_code: None,
             viewing_key: Some("bkey".to_string()),
             start_after: None,
             limit: None,
@@ -1678,6 +1711,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: alice.clone(),
             viewer: None,
+            access_code: None,
             viewing_key: Some("akey".to_string()),
             start_after: None,
             limit: Some(3),
@@ -1694,6 +1728,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: alice.clone(),
             viewer: None,
+            access_code: None,
             viewing_key: Some("akey".to_string()),
             start_after: Some("NFT34".to_string()),
             limit: Some(30),
@@ -1714,6 +1749,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: alice.clone(),
             viewer: None,
+            access_code: None,
             viewing_key: None,
             start_after: None,
             limit: Some(30),
@@ -1905,6 +1941,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: alice.clone(),
             viewer: Some(bob.clone()),
+            access_code: None,
             viewing_key: Some("bkey".to_string()),
             start_after: Some("NFT8".to_string()),
             limit: Some(30),
@@ -1917,6 +1954,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: charlie.clone(),
             viewer: Some(alice.clone()),
+            access_code: None,
             viewing_key: Some("akey".to_string()),
             start_after: Some("NFT7".to_string()),
             limit: Some(30),
@@ -1929,6 +1967,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: charlie.clone(),
             viewer: Some(bob.clone()),
+            access_code: None,
             viewing_key: Some("bkey".to_string()),
             start_after: Some("NFT8".to_string()),
             limit: Some(30),
@@ -1946,6 +1985,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: charlie.clone(),
             viewer: Some(alice.clone()),
+            access_code: None,
             viewing_key: Some("akey".to_string()),
             start_after: Some("NFT8".to_string()),
             limit: Some(30),
@@ -1965,6 +2005,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: alice.clone(),
             viewer: Some(charlie.clone()),
+            access_code: None,
             viewing_key: Some("ckey".to_string()),
             start_after: Some("NFT3".to_string()),
             limit: Some(30),
@@ -1977,6 +2018,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: alice.clone(),
             viewer: None,
+            access_code: None,
             viewing_key: Some("ckey".to_string()),
             start_after: Some("NFT3".to_string()),
             limit: Some(30),
@@ -1989,6 +2031,7 @@ mod tests {
         let query_msg = QueryMsg::Tokens {
             owner: alice.clone(),
             viewer: Some(charlie.clone()),
+            access_code: None,
             viewing_key: Some("ckey".to_string()),
             start_after: Some("NFT34".to_string()),
             limit: Some(30),
@@ -2661,6 +2704,7 @@ mod tests {
         let query_msg = QueryMsg::PrivateMetadata {
             token_id: "NFT1".to_string(),
             viewer: None,
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         let query_answer: QueryAnswer = from_binary(&query_result.unwrap()).unwrap();
@@ -2688,6 +2732,7 @@ mod tests {
         let query_msg = QueryMsg::PrivateMetadata {
             token_id: "NFT1".to_string(),
             viewer: None,
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         let query_answer: QueryAnswer = from_binary(&query_result.unwrap()).unwrap();
@@ -2751,6 +2796,7 @@ mod tests {
                 address: alice.clone(),
                 viewing_key: "akey".to_string(),
             }),
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         let error = extract_error_msg(query_result);
@@ -2770,6 +2816,7 @@ mod tests {
                 address: alice.clone(),
                 viewing_key: "akey".to_string(),
             }),
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         let query_answer: QueryAnswer = from_binary(&query_result.unwrap()).unwrap();
@@ -2791,6 +2838,7 @@ mod tests {
                 address: bob.clone(),
                 viewing_key: "bkey".to_string(),
             }),
+            access_code: None,
         };
         let query_result = query(&deps, query_msg);
         let error = extract_error_msg(query_result);
@@ -4393,6 +4441,7 @@ mod tests {
                 address: alice.clone(),
                 viewing_key: alice_key.clone(),
             }),
+            access_code: None,
             include_expired: None,
         };
         let mint_run_info = MintRunInfo {
@@ -4420,6 +4469,8 @@ mod tests {
                 private_metadata_is_public_expiration: None,
                 token_approvals: Some(Vec::new()),
                 inventory_approvals: Some(Vec::new()),
+                token_code_approvals: Some(Vec::new()),
+                inventory_code_approvals: Some(Vec::new()),
             },
             BatchNftDossierElement {
                 token_id: "NFT2".to_string(),
@@ -4437,6 +4488,9 @@ mod tests {
                 private_metadata_is_public_expiration: None,
                 token_approvals: Some(Vec::new()),
                 inventory_approvals: Some(Vec::new()),
+                token_code_approvals: Some(Vec::new()),
+                inventory_code_approvals: Some(Vec::new()),
+                
             },
             // last one belongs to bob, so you can only see public info
             BatchNftDossierElement {
@@ -4457,6 +4511,8 @@ mod tests {
                 private_metadata_is_public_expiration: None,
                 token_approvals: None,
                 inventory_approvals: None,
+                token_code_approvals: None,
+                inventory_code_approvals: None,
             },
         ];
         let query_result = query(&deps, query_msg);

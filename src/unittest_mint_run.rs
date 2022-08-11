@@ -121,6 +121,7 @@ mod tests {
         let query_msg = QueryMsg::NftDossier {
             token_id: "0".to_string(),
             viewer: None,
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -134,6 +135,7 @@ mod tests {
         let query_msg = QueryMsg::NftDossier {
             token_id: "1".to_string(),
             viewer: None,
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -147,6 +149,7 @@ mod tests {
         let query_msg = QueryMsg::NftDossier {
             token_id: "2".to_string(),
             viewer: None,
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -183,6 +186,7 @@ mod tests {
         let query_msg = QueryMsg::NftDossier {
             token_id: "3".to_string(),
             viewer: None,
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -219,6 +223,7 @@ mod tests {
         let query_msg = QueryMsg::NftDossier {
             token_id: "4".to_string(),
             viewer: None,
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
@@ -240,6 +245,7 @@ mod tests {
         let query_msg = QueryMsg::NftDossier {
             token_id: "5".to_string(),
             viewer: None,
+            access_code: None,
             include_expired: None,
         };
         let query_result = query(&deps, query_msg);
