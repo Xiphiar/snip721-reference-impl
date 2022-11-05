@@ -49,7 +49,7 @@ pub struct Extension {
     /// optional list of individuals issuing the certificate
     pub issuing_individuals: Option<Vec<Individual>>,
     /// optional list of additional information for the certificate. Courses, instructors, etc.
-    pub inclusions: Option<Vec<Inclusion>>,
+    pub additions: Option<Vec<Addition>>,
     /// url to the image
     pub image: Option<String>,
     /// raw SVG image data (not recommended). Only use this if you're not including the image parameter
@@ -124,6 +124,7 @@ pub struct CertificateInfo {
     pub issue_date: Option<String>,
     pub expire_date: Option<String>,
     pub cert_number: String,
+    pub issuer_id: Option<String>,
 }
 
 // recipient information
@@ -162,10 +163,12 @@ pub struct Individual {
     pub title: Option<String>,
 }
 
-// idk what to call this one, its for instructors and classes n stuff
+// Additional information. Instructors, classes, etc
 #[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug, Default)]
-pub struct Inclusion {
-    pub inclusion_type: Option<String>,
-    pub name: Option<String>,
+pub struct Addition {
+    pub addition_type: Option<String>,
     pub value: Option<String>,
+    pub details: Option<String>,
+    pub individual: Option<Individual>,
+    pub organization: Option<Organization>,
 }
